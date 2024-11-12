@@ -2,7 +2,7 @@
 
 This short clog introduces the regname.bash Bash shell script that can rename all files and directories with invalid names that exist within a filesystem.
 
-//TODO: link regname.bash
+- https://github.com/deliverystack/wslbin/blob/main/bin/regname.bash
 
 This script uses things like ${1:-.}, shopt -s globstar and possibly other shell features that depend on Bash.
 

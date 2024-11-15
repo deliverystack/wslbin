@@ -17,7 +17,6 @@ clean_name() {
     echo "$1" | sed 's/[^a-zA-Z0-9._-]/_/g'
 }
 
-# Directory to process
 source_dir="${1:-.}"
 
 if [[ ! -d "$source_dir" ]]; then
@@ -27,7 +26,7 @@ fi
 
 echo -e "${green}${script_name}${reset}: Starting to search for compressed files in ${green}$source_dir${reset} and extract them..."
 
-for file in "$source_dir"/**/*.{tar,tar.gz,tar.bz2,zip,gz,rar}; do
+for file in "$source_dir"/**/*.{tar,tar.gz,tar.bz2,zip,gz,rar,7z}; do
     [[ -e "$file" ]] || continue
     start_time=$(date +%s)
 
@@ -38,6 +37,7 @@ for file in "$source_dir"/**/*.{tar,tar.gz,tar.bz2,zip,gz,rar}; do
     base=$(clean_name "$(basename "$base" .zip)")
     base=$(clean_name "$(basename "$base" .gz)")
     base=$(clean_name "$(basename "$base" .rar)")
+    base=$(clean_name "$(basename "$base" .7z)")
 
     target_dir="${dir}/${base}"
     mkdir -p "$target_dir"
@@ -70,6 +70,12 @@ for file in "$source_dir"/**/*.{tar,tar.gz,tar.bz2,zip,gz,rar}; do
         fi
     elif [[ "$file" == *.gz ]]; then
         if gunzip -c "$file" > "${target_dir}/${base}"; then
+            rm "$file"
+        else
+            echo -e "${green}${script_name}${reset}: ${yellow}Failed to extract: $file${reset}"
+        fi
+    elif [[ "$file" == *.7z ]]; then
+        if 7z x "$file" -o"$target_dir"; then
             rm "$file"
         else
             echo -e "${green}${script_name}${reset}: ${yellow}Failed to extract: $file${reset}"

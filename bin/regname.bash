@@ -1,4 +1,5 @@
 #!/usr/bin/bash
+# https://github.com/deliverystack/wslbin/blob/main/regname.bash.md
 
 shopt -s globstar
 

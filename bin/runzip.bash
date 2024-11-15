@@ -91,4 +91,4 @@ for file in "$source_dir"/**/*.{tar,tar.gz,tar.bz2,zip,gz,rar}; do
 done
 
 echo -e "${green}${script_name}${reset}: All files processed in ${green}$source_dir${reset}."
-echo -e "${green}${script_name}${reset}: Run ${script_name} to confirm no remaining volumes."
+echo -e "${green}${script_name}${reset}: Run ${script_name} again to confirm no remaining volumes."

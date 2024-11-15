@@ -5,3 +5,5 @@ This short clog introduces the runzip.bash Bash shell script that decompresses i
 - https://github.com/deliverystack/wslbin/blob/main/bin/runzip.bash
 
 This script uses things like ${1:-.}, shopt -s globstar and possibly other shell features that depend on Bash.
+
+If the expanded volumes contain nested volumes, run the command again.

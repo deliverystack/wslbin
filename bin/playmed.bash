@@ -74,7 +74,6 @@ usage() {
 }
 
 while getopts ":a:CdD:GhIilm:n:pO:rRs:t:Vxz" opt; do
-    debug "Processing option: -$opt with argument: $OPTARG"  # Debug
     case ${opt} in
         a) sort_alpha=true ;;
         C) enable_timer=true ;;
@@ -100,50 +99,38 @@ while getopts ":a:CdD:GhIilm:n:pO:rRs:t:Vxz" opt; do
     esac
 done
 
-log "Debug: sourec_dir is set to: $sourec_dir"
-
-
-# Validate that -p is only used with -m
 if ${pause_audio} && [[ ${#audio_files[@]} -eq 0 ]]; then
     error "The -p option requires background audio files to be specified with -m."
 fi
 
-# Validate mutual exclusivity for sorting and randomization
 if ${shuffle} && { ${sort_alpha} || ${sort_date}; }; then
     error "The -r (shuffle) option cannot be used with -a (sort alphabetically) or -x (sort by date)."
 fi
 
-# Validate that -z (reverse) only works with -a (alphabetical sorting) or -x (date sorting)
 if ${reverse} && ! { ${sort_alpha} || ${sort_date}; }; then
     error "The -z (reverse) option requires either -a (sort alphabetically) or -x (sort by date)."
 fi
 
-# Validate that -O (only videos) is not used with image options
 if ${only_videos} && { ${include_gifs} || ${#audio_files[@]} -gt 0; }; then
     error "The -O (only videos) option cannot be used with -G (include GIFs) or -m (background audio files)."
 fi
 
-# Validate that -V (include videos) is not used with -O (only videos)
 if ${include_videos} && ${only_videos}; then
     error "The -V (include videos) option cannot be used with -O (only videos)."
 fi
 
-# Validate -m (audio files) is required if -p (pause audio during video) is set
 if ${pause_audio} && [[ ${#audio_files[@]} -eq 0 ]]; then
     error "The -p option requires background audio files to be specified with -m."
 fi
 
-# Validate that both -r (randomize) and -x (sort by date) cannot be used together
 if ${shuffle} && ${sort_date}; then
     error "The -r (randomize) option cannot be used with -x (sort by date)."
 fi
 
-# Validate -D (directory) argument exists and is a valid directory
 if [[ ! -d "${sourec_dir}" ]]; then
     error "The specified directory ${color_var}${sourec_dir}${color_reset} does not exist or is not a directory."
 fi
 
-# Ensure -p (pause) is only set when audio files are specified
 if ${pause_audio} && [[ ${#audio_files[@]} -eq 0 ]]; then
     error "The -p option requires audio files to be specified using -m."
 fi
@@ -151,10 +138,8 @@ fi
 if [[ -n "$OPTARG" ]]; then
     IFS=',' read -r -a audio_files <<< "$OPTARG"
     for dir in "${audio_files[@]}"; do
-        # If it's a directory, find all .flac and .mp3 files under that directory
         if [[ -d "$dir" ]]; then
             log "Adding audio files from directory: ${color_var}$dir${color_reset}"
-            # Add all .flac and .mp3 files to the audio_files array
             mapfile -t new_audio_files < <(find "$dir" -type f \( -iname "*.flac" -o -iname "*.mp3" \))
             audio_files+=("${new_audio_files[@]}")  # Add the found files to the existing list
         fi
@@ -203,13 +188,19 @@ gather_files() {
     else
         mapfile -t files < <(find "${sourec_dir}" -maxdepth 1 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.bmp' -o -iname '*.gif' \))
     fi
+    echo includinfg $include_videos
 
     if ${include_videos}; then
+    echo includinfg videos
+    echo recurse $recurse
         if ${recurse}; then
+        echo recursing
             mapfile -t video_files < <(find "${sourec_dir}" -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.webm' \))
         else
+        echo not recursing
             mapfile -t video_files < <(find "${sourec_dir}" -maxdepth 1 -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.webm' \))
         fi
+        echo adding $video_files
         files+=("${video_files[@]}")
     fi
 
@@ -219,7 +210,6 @@ gather_files() {
 
     debug "Gathered files: ${color_var}${files[*]}${color_reset}"
 
-    # If -l (loop) is set, ensure that files are available to loop through
     if ${loop} && [[ ${#files[@]} -eq 0 ]]; then
         error "The slideshow cannot loop because no files were found."
     fi
@@ -271,27 +261,32 @@ run_slideshow() {
     start_audio
     trap cleanup INT TERM  # Handle Ctrl+C or termination
 
-    # Main loop for slideshow
     while :; do
         for file in "${files[@]}"; do
-            # Check if it's an image file
             if [[ "${file}" =~ \.(jpg|jpeg|png|bmp|gif)$ ]]; then
                 log "Displaying image ${color_var}${file}${color_reset} for ${color_var}${max_time}${color_reset} seconds."
-
-
-                feh --auto-zoom --fullscreen --borderless --image-bg black -D "${max_time}" --on-last-slide quit --info "realpath \"$file\"" "$file" &
+                feh --auto-zoom --fullscreen --borderless --image-bg black -D "${max_time}" --on-last-slide quit --info "realpath $file" "$file" &
                 feh_pid=$!
-
-                # If countdown timer is enabled, show a countdown before the next slide
                 [[ ${enable_timer} == true ]] && countdown_timer "${max_time}"
-
-                # Wait for feh to finish before proceeding to the next image
                 wait "${feh_pid}"
+            elif [[ "${file}" =~ \.(mp4|mkv|avi|webm)$ ]]; then
+                log "Playing video ${color_var}${file}${color_reset} for up to ${color_var}${video_duration}${color_reset} seconds."
+
+                if ${pause_audio} && [[ -n ${audio_pid} ]]; then
+                    log "Pausing background music."
+                    kill -SIGSTOP "${audio_pid}"
+                fi
+
+                mpv --fs --length="${video_duration}" "$(realpath "$file")"
+
+                if ${pause_audio} && [[ -n ${audio_pid} ]]; then
+                    log "Resuming background music."
+                    kill -SIGCONT "${audio_pid}"
+                fi
             fi
         done
 
-        # If loop is enabled, shuffle and restart slideshow
-        if ! ${loop}; then
+        if ! ${loop} || [[ ${#files[@]} -eq 0 ]]; then
             break
         fi
 
@@ -310,9 +305,3 @@ main() {
 
 main
 exit
-
-
-
-
-
-git clone git@github.com:username/repository.git

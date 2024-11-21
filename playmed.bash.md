@@ -6,7 +6,7 @@ Clippy 2.0 I and I wrote a Bash shell script to render a slideshow from the imag
 - Sort by name or date in forward or reverse order, or randomize 
 - Play .flac and/or .mp3 in the background with the option to pause during video.
 - Render animated gifs.
--Display file names during the show.
+- Display file names during the show.
 
 Probably more; I forget. Completely untested.
 

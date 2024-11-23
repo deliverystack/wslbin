@@ -1,73 +1,331 @@
 #!/usr/bin/bash
-# https://github.com/deliverystack/wslbin/blob/main/regname.bash.md
 
 shopt -s globstar
 
-prefix="$(tput setaf 2)$(basename "$0")$(tput sgr0)"
+# Set script name
+script_name="$(basename "$0")"
 
-yellow() { tput setaf 3; echo -n "$1"; tput sgr0; }
-red() { tput setaf 1; echo -n "$1"; tput sgr0; }
+# Temporary file for invalid files
+temp_file=$(mktemp)
 
-# invalid_chars="&?/'\":"
-invalid_pattern="[&?/'\":\[\]]|[.]$|[[:space:]]$"
+# Cleanup on exit
+trap "rm -f ${temp_file}" EXIT
 
-clean_name() {
-    echo "$1" | sed "s|[&?/'\":\[\]]|-|g; s|[.]$||; s|[[:space:]]$||"
+# Define color functions
+green() { tput setaf 2; printf "%s" "$1"; tput sgr0; }
+yellow() { tput setaf 3; printf "%s" "$1"; tput sgr0; }
+red() { tput setaf 1; printf "%s" "$1"; tput sgr0; }
+
+# Logging functions
+log() {
+    printf "%s: %s\n" "$(green "${script_name}")" "$1"
 }
 
-prompt_rename() {
-    local old_name="$1"
-    local default_new_name
-    default_new_name=$(clean_name "$(basename "$old_name")")
-    printf "%s: Invalid file name detected: %s\n" "$prefix" "$(yellow "$old_name")"
-    read -p "Enter new name [default: $default_new_name, skip to move on]: " new_name
-    if [ -z "$new_name" ]; then
-        new_name="$default_new_name"
-    elif [ "$new_name" = "skip" ]; then
-        printf "%s: Skipping: %s\n" "$prefix" "$(yellow "$old_name")"
-        return
-    fi
-    mv "$old_name" "$(dirname "$old_name")/$new_name" || {
-        printf "%s: Failed to rename %s.\n" "$prefix" "$(yellow "$old_name")"
-    }
+warn() {
+#    printf "%s: %s\a\n" "$(yellow "${script_name}")" "$1"
+    printf "%s: %s\n" "$(yellow "${script_name}")" "$1"
 }
 
-usage() {
-    printf "%s: Usage: %s [directory]\n" "$prefix" "$prefix"
+error() {
+    printf "%s: %s\n" "$(red "${script_name}")" "$1"
     exit 1
 }
 
-directory="${1:-.}"
+debug() {
+    if [ "${verbose:-0}" -eq 1 ]; then
+        printf "%s: %s\n" "$(green "${script_name}")" "$1"
+    fi
+}
 
-if [ ! -d "$directory" ]; then
-    printf "%s: Directory %s does not exist.\n" "$prefix" "$(red "$directory")"
-    usage
+resolve_renamed_path() {
+    local original_path="$1"
+    local relative_path="${original_path#"${source_dir}/"}"
+    local renamed_path="${target_dir}"
+
+    debug "Resolving renamed path for: ${original_path}"
+    debug "Initial relative path: ${relative_path}"
+
+    # Split the relative path into its components
+    IFS='/' read -ra path_parts <<< "${relative_path}"
+
+    for part in "${path_parts[@]}"; do
+        if [ -d "${source_dir}/${part}" ] && [ "${disable_rename_directories}" -eq 1 ]; then
+            # Keep the original name if renaming directories is disabled
+            renamed_part="${part}"
+        else
+            clean_name "${part}"
+            renamed_part="${REPLY}"
+        fi
+
+        debug "Original part: ${part}, Renamed part: ${renamed_part}"
+        renamed_path="${renamed_path}/${renamed_part}"
+    done
+
+    debug "Final resolved path: ${renamed_path}"
+    REPLY="${renamed_path}"
+}
+
+clean_name() {
+    local original="$1"
+    local base
+    local ext=""
+    local cleaned
+
+    debug "Processing file: ${original}"
+
+    # Split the filename into base and extension
+    if [ -d "$original" ]; then
+        base="$original"
+        debug "Detected directory. Using base: ${base}"
+    else
+        base="${original%.*}"
+        ext="${original##*.}"
+
+        if [[ "$base" == "$original" ]]; then
+            ext=""
+        fi
+        debug "Split name into base: '${base}', extension: '${ext}'"
+    fi
+
+    # Skip renaming for ignored extensions
+    for ignored_ext in "${ignore_ext_array[@]}"; do
+        if [[ "${ext,,}" == "${ignored_ext,,}" ]]; then
+            debug "Skipping file due to ignored extension: ${ext}"
+            REPLY="$original"
+            return
+        fi
+    done
+
+    cleaned=$(echo "$base" | sed -E "
+        s|[^a-zA-Z0-9._-]|-|g;
+        s|-{2,}|-|g;
+        s|[-]$||g;
+    " | tr '[:upper:]' '[:lower:]')
+
+    # Apply minimum length check unless disabled
+    if [ "${disable_length_check}" -eq 0 ] && [ "${#cleaned}" -lt 3 ]; then
+        cleaned="file-${RANDOM}"
+    fi
+
+    if [[ -n "$ext" && ! -d "$original" ]]; then
+        cleaned="${cleaned}.${ext}"
+    fi
+
+    REPLY="$cleaned"
+    return
+}
+
+usage() {
+    cat <<EOF
+Usage: $(green "${script_name}") [options]
+  -d Disable renaming directories
+  -f Force renaming without prompting
+  -h Show this help message
+  -i <extensions> Comma-separated extensions to ignore
+  -l Disable minimum length requirement for filenames
+  -r Generate a report instead of renaming/copying
+  -s <dir> Source directory (default: .)
+  -t <dir> Target directory (copy files instead of renaming)
+  -v Enable verbose output
+EOF
+    exit 0
+}
+
+source_dir="."
+verbose=0
+target_dir=""
+generate_report=0
+force_rename=0
+disable_rename_directories=0
+disable_length_check=0
+
+while getopts "dfhi:lrs:t:v" opt; do
+    case ${opt} in
+        d) disable_rename_directories=1 ;;
+        f) force_rename=1 ;;
+        h) usage ;;
+        i) ignore_extensions="${OPTARG}" ;;
+        r) generate_report=1 ;;
+        s) source_dir="${OPTARG}" ;;
+        t) target_dir="${OPTARG}" ;;
+        v) verbose=1 ;;
+        *) usage ;;
+    esac
+done
+
+IFS=',' read -r -a ignore_ext_array <<< "${ignore_extensions}"
+
+if [[ ${#ignore_ext_array[@]} -eq 0 ]]; then
+    log "No ignored extensions specified or array is empty."
+else
+    log "Ignored extensions array: $(green "${ignore_ext_array[*]}")"
 fi
 
-start_time=$(date +%s)
-full_path=$(realpath "$directory")
-printf "%s: Finding all files and subdirectories under: %s\n" "$prefix" "$full_path"
+# Validate conflicting options
+if [[ "${generate_report}" -eq 1 && -n "${target_dir}" ]]; then
+    error "Options -r (generate report) and -t (specify target directory) cannot be used together."
+fi
 
-invalid_files=()
+# Validate source directory
+if [ ! -d "${source_dir}" ]; then
+    error "Source directory does not exist: $(yellow "${source_dir}")"
+fi
 
-for file in "$directory"/**/*; do
-    if [ -e "$file" ]; then
-        base_name=$(basename "$file")
-        if [[ "$base_name" =~ $invalid_pattern ]]; then
-            invalid_files+=("$file")
-        fi
+if [ -n "${target_dir}" ] && [ "${source_dir}" == "${target_dir}" ]; then
+    error "Source directory $(yellow "${source_dir}") and target directory $(yellow "${target_dir}") cannot be the same."
+fi
+
+log "Starting script with source_dir=$(green "${source_dir}")"
+if [ -n "${target_dir}" ]; then
+    log "Target directory is set: $(green "${target_dir}")"
+    if [ ! -d "${target_dir}" ]; then
+        warn "Target directory does not exist: $(yellow "${target_dir}")"
+        exit 1
+    fi
+fi
+
+for file in "${source_dir}"/**/*; do
+    if [ ! -e "${file}" ]; then
+        warn "Skipping unknown type: ${file}"
+        continue
+    fi
+
+    clean_name "$(basename "${file}")"
+    new_name="$REPLY"
+
+    if [[ "$(basename "${file}")" != "${new_name}" ]]; then
+        echo "${file}:${new_name}" >> "${temp_file}"
+        warn "Invalid file name: $(yellow "${file}") -> $(green "${new_name}")"
     fi
 done
 
-end_time=$(date +%s)
-elapsed=$((end_time - start_time))
-printf "%s: Globbing took %'d seconds.\n" "$prefix" "$elapsed"
+log "Found $(green "$(wc -l < "${temp_file}")") invalid files."
 
-num_invalid_files=${#invalid_files[@]}
-printf "%s: Found %'d invalid files and/or directories.\n" "$prefix" "$num_invalid_files"
+if [ "${generate_report}" -eq 1 ]; then
+    log "Generating report..."
+    while IFS=: read -r old_name new_name; do
 
-for file in "${invalid_files[@]}"; do
-    prompt_rename "$file"
-done
+        if [ -f "${old_name}" ]; then
+            debug "File detected: ${old_name}"
+        elif [ -d "${old_name}" ]; then
+            debug "Directory detected: ${old_name}"
+        else
+            warn "Skipping unknown type: ${entry}"
+            continue
+        fi
 
-printf "%s: Completed processing invalid files and directories.\n" "$prefix"
+        printf "%s: %s -> %s\n" \
+            "$(green "${script_name}")" \
+            "$(yellow "${old_name}")" \
+            "$(green "${new_name}")"
+    done < "${temp_file}"
+    exit 0
+fi
+
+declare -A renamed_dirs  # Track renamed directories
+
+while IFS= read -r -d '' entry; do
+    clean_name "$(basename "${entry}")"
+    new_name="$REPLY"
+
+    debug "Processing entry: ${entry}"
+    debug "Cleaned name: ${new_name}"
+
+    if [ -d "${entry}" ]; then
+        # Process directories
+        debug "Detected directory: ${entry}"
+
+        if [ "${disable_rename_directories}" -eq 1 ]; then
+            debug "Skipping directory renaming for: $(yellow "${entry}")"
+            renamed_dirs["${entry}"]="${entry}"  # Track directory as-is
+            continue
+        fi
+
+        if [ -n "${target_dir}" ]; then
+            # Create new path for directory in target_dir
+            resolve_renamed_path "${entry}" "${target_dir}"
+            new_dir_path="${REPLY}"
+
+            debug "Resolved directory path: ${new_dir_path}"
+
+            mkdir -p "${new_dir_path}" || error "Failed to create directory: $(yellow "${new_dir_path}")"
+            renamed_dirs["${entry}"]="${new_dir_path}"
+            log "Processed directory: $(green "${entry}") to $(green "${new_dir_path}")"
+        else
+            # Rename directory in place
+            if [ "${entry}" != "$(dirname "${entry}")/${new_name}" ]; then
+                if [ "${force_rename}" -eq 1 ]; then
+                    mv "${entry}" "$(dirname "${entry}")/${new_name}" || error "Failed to rename directory: $(yellow "${entry}")"
+                    renamed_dirs["${entry}"]="$(dirname "${entry}")/${new_name}"
+                    log "Renamed directory: $(green "${entry}") to $(green "${renamed_dirs["${entry}"]}")"
+                    printf "\a"
+                else
+                    printf "%s: Invalid directory name detected: %s\n" \
+                        "$(green "${script_name}")" "$(yellow "${entry}")"
+                    read -r -p "Enter new name [default: $new_name, skip to move on]: " user_input
+                    if [ -z "${user_input}" ]; then
+                        user_input="${new_name}"
+                    elif [ "${user_input}" = "skip" ]; then
+                        warn "Skipping: $(yellow "${entry}")"
+                        continue
+                    fi
+                    mv "${entry}" "$(dirname "${entry}")/${user_input}" || {
+                        warn "Failed to rename: $(yellow "${entry}")"
+                        continue
+                    }
+                    renamed_dirs["${entry}"]="$(dirname "${entry}")/${user_input}"
+                    log "Renamed directory: $(green "${entry}") to $(green "${renamed_dirs["${entry}"]}")"
+                    printf "\a"
+                fi
+            else
+                renamed_dirs["${entry}"]="${entry}"
+            fi
+        fi
+    elif [ -f "${entry}" ]; then
+        # Process files
+        debug "Detected file: ${entry}"
+
+        if [ -n "${target_dir}" ]; then
+            # Determine new parent directory if renamed
+            parent_dir="$(dirname "${entry}")"
+            new_parent_dir="${renamed_dirs["${parent_dir}"]:-${target_dir}/${parent_dir#"${source_dir}"/}}"
+            target_path="${new_parent_dir}/${new_name}"
+
+            debug "Resolved file target path: ${target_path}"
+
+            mkdir -p "$(dirname "${target_path}")" || error "Failed to create parent directory: $(yellow "$(dirname "${target_path}")")"
+            cp "${entry}" "${target_path}" || error "Failed to copy file: $(yellow "${entry}")"
+            log "Copied file: $(green "${entry}") to $(green "${target_path}")"
+            printf "\a"
+        else
+            # Rename file in place
+            if [ "${entry}" != "$(dirname "${entry}")/${new_name}" ]; then
+                if [ "${force_rename}" -eq 1 ]; then
+                    mv "${entry}" "$(dirname "${entry}")/${new_name}" || error "Failed to rename file: $(yellow "${entry}")"
+                    log "Renamed file: $(green "${entry}") to $(green "$(dirname "${entry}")/${new_name}")"
+                    printf "\a"
+                else
+                    printf "%s: Invalid file name detected: %s\n" \
+                        "$(green "${script_name}")" "$(yellow "${entry}")"
+                    read -r -p "Enter new name [default: $new_name, skip to move on]: " user_input
+                    if [ -z "${user_input}" ]; then
+                        user_input="${new_name}"
+                    elif [ "${user_input}" = "skip" ]; then
+                        warn "Skipping: $(yellow "${entry}")"
+                        continue
+                    fi
+                    mv "${entry}" "$(dirname "${entry}")/${user_input}" || {
+                        warn "Failed to rename: $(yellow "${entry}")"
+                        continue
+                    }
+                    log "Renamed file: $(green "${entry}") to $(green "$(dirname "${entry}")/${user_input}")"
+                    printf "\a"
+                fi
+            fi
+        fi
+    else
+        warn "Skipping unknown type: $(yellow "${entry}")"
+    fi
+done < <(find "${source_dir}" -mindepth 1 -print0)
+
+log "Processing complete."

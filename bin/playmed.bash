@@ -304,7 +304,7 @@ run_slideshow() {
                 fi
 
                 # Execute the constructed mpv command
-                eval "$mpv_cmd"
+                eval "$mpv_cmd --profile=fast --hwdec=auto-safe"
 
                 # Clean up the temporary subtitle file after playback (if created)
                 if ${add_subtitles}; then
@@ -326,58 +326,6 @@ run_slideshow() {
         log "Restarting slideshow..."
         sort_and_shuffle_files  # Re-sort or shuffle files as needed
     done
-}
-
-no_sibtitles_run_slideshow() {
-    log "Starting slideshow..."
-    monitor_exit &
-    start_audio
-    trap cleanup INT TERM  # Handle Ctrl+C or termination
-
-    while :; do
-        for file in "${files[@]}"; do
-            # Handle image and video playback (unchanged from your script)
-            if [[ "${file}" =~ \.(jpg|jpeg|png|bmp|gif)$ ]]; then
-                log "Displaying image ${color_var}${file}${color_reset} for ${color_var}${max_time}${color_reset} seconds."
-
-                feh_options=(--auto-zoom --fullscreen --borderless --image-bg black -D "${max_time}" --on-last-slide quit "${file}")
-                if ${include_info}; then
-                    feh_options+=(--info "$(realpath "${file}")")
-                fi
-                feh "${feh_options[@]}"
-                feh_pid=$!
-
-                # Add timer if enabled
-                [[ ${enable_timer} == true ]] && countdown_timer "${max_time}"
-
-                wait "${feh_pid}"
-            elif [[ "${file}" =~ \.(mp4|mkv|avi|webm)$ ]]; then
-                log "Playing video ${color_var}${file}${color_reset} for up to ${color_var}${video_duration}${color_reset} seconds."
-
-                if ${pause_audio} && [[ -n ${audio_pid} ]]; then
-                    log "Pausing background music."
-                    kill -SIGSTOP "${audio_pid}"  # Pause audio playback
-                fi
-
-                # Play video using mpv with explicit audio backend set to pulse or alsa
-                mpv --fs --length="${video_duration}" --audio-device=pulse "$(realpath "$file")"
-
-                if ${pause_audio} && [[ -n ${audio_pid} ]]; then
-                    log "Resuming background music."
-                    kill -SIGCONT "${audio_pid}"  # Resume audio playback
-                fi
-            fi
-        done
-
-        if ! ${loop}; then
-            break
-        fi
-
-        log "Restarting slideshow..."
-        sort_and_shuffle_files  # Re-sort or shuffle files as needed
-    done
-
-    cleanup  # Clean up resources when done
 }
 
 main() {

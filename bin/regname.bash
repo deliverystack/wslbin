@@ -329,3 +329,4 @@ while IFS= read -r -d '' entry; do
 done < <(find "${source_dir}" -mindepth 1 -print0)
 
 log "Processing complete."
+

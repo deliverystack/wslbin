@@ -1,4 +1,4 @@
-#!/usr/bin/bash
+#!/usr/bin/bash 
 # https://chatgpt.com/share/673f52a5-4f04-8005-b334-bdbeafc8ddd6
 # ~/git/wslbin/bin/playmed.bash -s 3 -C -d -G -l -r -R -t 3 -V -I -D "/mnt/d/from-onetouch/media/ByYear/2023" -m '/mnt/d/mp3s/XTC'
 
@@ -12,7 +12,7 @@ color_error=$(tput setaf 1) # Red
 color_var=$(tput setaf 4)   # Blue
 min_time=3
 max_time=5
-video_duration=10
+video_duration=0
 shuffle=false
 debug=false
 reverse=false
@@ -28,7 +28,6 @@ enable_timer=false
 pause_audio=false
 only_videos=false
 add_subtitles=false  
-
 
 log() {
     echo -e "${color_info}${script_name}:${color_reset} $*"
@@ -76,7 +75,7 @@ EOF
     exit 1
 }
 
-while getopts ":a:CdD:Ghilm:n:pO:rRs:St:Vxz" opt; do
+while getopts ":a:CdD:Ghilm:n:pOrRs:St:Vxz" opt; do
     case ${opt} in
         a) sort_alpha=true ;;
         C) enable_timer=true ;;
@@ -114,7 +113,7 @@ if ${reverse} && ! { ${sort_alpha} || ${sort_date}; }; then
     error "The -z (reverse) option requires either -a (sort alphabetically) or -x (sort by date)."
 fi
 
-if ${only_videos} && { ${include_gifs} || ${#audio_files[@]} -gt 0; }; then
+if [[ "${only_videos}" == "true" ]] && { [[ "${include_gifs}" == "true" ]] || [[ ${#audio_files[@]} -gt 0 ]]; }; then
     error "The -O (only videos) option cannot be used with -G (include GIFs) or -m (background audio files)."
 fi
 
@@ -162,6 +161,9 @@ validate_dependencies() {
     if ! command -v feh &> /dev/null; then
         missing_deps+=("feh")
     fi
+    if ! command -v convert &> /dev/null; then
+        missing_deps+=("imagemagick")
+    fi
     if ${include_videos} || ${include_gifs} || [[ ${#audio_files[@]} -gt 0 ]]; then
         if ! command -v mpv &> /dev/null; then
             missing_deps+=("mpv")
@@ -178,10 +180,13 @@ validate_dependencies() {
 
 gather_files() {
     files=()
-    if ${recurse}; then
-        mapfile -t files < <(find "${source_dir}" -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.bmp' -o -iname '*.gif' \))
-    else
-        mapfile -t files < <(find "${source_dir}" -maxdepth 1 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.bmp' -o -iname '*.gif' \))
+
+    if [[ "${only_videos}" != "true" ]]; then
+        if ${recurse}; then
+            mapfile -t files < <(find "${source_dir}" -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.bmp' -o -iname '*.gif' \))
+        else
+            mapfile -t files < <(find "${source_dir}" -maxdepth 1 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.bmp' -o -iname '*.gif' \))
+        fi
     fi
 
     if ${include_videos}; then
@@ -201,6 +206,7 @@ gather_files() {
 
     if ${loop} && [[ ${#files[@]} -eq 0 ]]; then
         error "The slideshow cannot loop because no files were found."
+        exit
     fi
 }
 
@@ -264,47 +270,52 @@ run_slideshow() {
         for file in "${files[@]}"; do
             # Check if it's an image file
             if [[ "${file}" =~ \.(jpg|jpeg|png|bmp|gif)$ ]]; then
-                log "Displaying image ${color_var}${file}${color_reset} for ${color_var}${max_time}${color_reset} seconds."
+                local display_file="$file"
+                log "Displaying image ${color_var}${display_file}${color_reset} for ${color_var}${max_time}${color_reset} seconds."
 
-                # Using realpath for --info
-                feh --auto-zoom --fullscreen --borderless --image-bg black -D "${max_time}" --on-last-slide quit --info "$(realpath "$file")" "$file" &
+#                feh --auto-zoom --auto-rotate --fullscreen --borderless --image-bg black -D "${max_time}" --on-last-slide quit \
+#                    $( [ "$include_info" = true ] && echo "--info \"bash -c '$info_cmd'\"" ) "$display_file" &
+
+                feh --auto-zoom --auto-rotate --fullscreen --borderless --image-bg black -D 5 --on-last-slide quit \
+                    --info "bash -c 'realpath \"$file\"'" "$file" &
+
+
+
                 feh_pid=$!
-
-                # If countdown timer is enabled, show a countdown before the next slide
                 [[ ${enable_timer} == true ]] && countdown_timer "${max_time}"
-
-                # Wait for feh to finish before proceeding to the next image
                 wait "${feh_pid}"
             # Check if it's a video file
             elif [[ "${file}" =~ \.(mp4|mkv|avi|webm)$ ]]; then
                 log "Playing video ${color_var}${file}${color_reset} for up to ${color_var}${video_duration}${color_reset} seconds."
 
                 # Initialize the mpv command
-                mpv_cmd="mpv --fs --length=${video_duration} --audio-device=pulse"
+                mpv_cmd="mpv --fs --audio-device=pulse --hwdec=auto-safe --msg-level=vo/gpu=warn --fs --hwdec=auto-safe --vo=gpu --gpu-context=wayland"
+
+                if [[ ${video_duration} -ne 0 ]]; then
+                    mpv_cmd+=" --length=${video_duration}"
+                fi
 
                 # Only create subtitle file if -S option is set
                 if ${add_subtitles}; then
                     subtitle_file=$(mktemp "/tmp/$(basename "${file%.*}").XXXXXX.srt")
                     echo "1" > "${subtitle_file}"  # Subtitle index
                     echo "00:00:00,000 --> 00:00:10,000" >> "${subtitle_file}"  # Time format (adjust duration if needed)
-#                    echo "$(realpath "$file")" >> "${subtitle_file}"  # Full file path as subtitle content
                     realpath --relative-to="${source_dir}" "$file" >> "${subtitle_file}"  
-#                    echo realpath --relative-to="${source_dir}" "$file" realpath --relative-to="${source_dir}" "$file" > /tmp/jw.log
-
-                    mpv_cmd="$mpv_cmd --sub-file=${subtitle_file}"
+                    mpv_cmd="$mpv_cmd --sub-file=\"${subtitle_file}\""
                     log "Subtitle file ${color_var}${subtitle_file}${color_reset} created."
                 fi
 
                 # Add the video file to the command
-                mpv_cmd="$mpv_cmd $(realpath "$file")"
-
+                mpv_cmd="$mpv_cmd \"$(realpath "$file")\""
                 if ${pause_audio} && [[ -n ${audio_pid} ]]; then
                     log "Pausing background music."
                     kill -SIGSTOP "${audio_pid}"  # Pause audio playback
                 fi
 
                 # Execute the constructed mpv command
-                eval "$mpv_cmd --profile=fast --hwdec=auto-safe"
+#                eval "$mpv_cmd --profile=fast --hwdec=auto-safe"
+echo $mpv_cmd
+                eval "$mpv_cmd" 
 
                 # Clean up the temporary subtitle file after playback (if created)
                 if ${add_subtitles}; then

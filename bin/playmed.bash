@@ -1,7 +1,7 @@
 #!/usr/bin/bash 
+
 # https://chatgpt.com/share/673f52a5-4f04-8005-b334-bdbeafc8ddd6
 # ~/git/wslbin/bin/playmed.bash -s 3 -C -d -G -l -r -R -t 3 -V -I -D "/mnt/d/from-onetouch/media/ByYear/2023" -m '/mnt/d/mp3s/XTC'
-
 
 export NO_FOCUS=true
 script_name=$(basename "$0")
@@ -11,27 +11,25 @@ color_info=$(tput setaf 2)  # Green
 color_warn=$(tput setaf 3)  # Yellow
 color_error=$(tput setaf 1) # Red
 color_var=$(tput setaf 4)   # Blue
-min_time=3
-max_time=5
+img_time=5
 video_duration=0
 shuffle=false
-debug=false
+verbose=false
 reverse=false
 sort_alpha=false
 sort_date=false
 loop=false
 include_videos=false
-include_gifs=false
+include_images=false
 source_dir="."
 audio_files=()
 include_info=false
-enable_timer=false
 pause_audio=false
-only_videos=false
-add_subtitles=false  
 
 log() {
-    echo -e "${color_info}${script_name}:${color_reset} $*"
+    if ${verbose}; then
+        echo -e "${color_info}${script_name}:${color_reset} $*"
+    fi
 }
 
 warn() {
@@ -42,33 +40,23 @@ error() {
     echo -e "${color_error}${script_name}:${color_reset} $*"
 }
 
-debug() {
-    if ${debug}; then
-        echo -e "${color_var}${script_name} (DEBUG):${color_reset} $*"
-    fi
-}
-
 usage() {
     cat <<EOF
 ${color_info}${script_name}:${color_reset} Display a slideshow of images, GIFs, and optionally videos.
 Usage: $script_name [options]
   -a           Sort images alphabetically (mutually exclusive with -r).
-  -C           Enable countdown timer for each slide.
-  -d           Enable debug mode.
-  -D <dir>     Specify the directory containing files (default: ${color_var}${source_dir}${color_reset}).
-  -G           Include GIFs with animation.
+  -d <dir>     Specify the directory containing files (default: ${color_var}${source_dir}${color_reset}).
   -h           Display this help message.
   -i           Include file information in slideshow (via feh's --info option).
+  -I           Include images.
   -l           Loop slideshow (reshuffles or resorts after completion).
   -m <files>   Comma-separated list of FLAC or MP3 files or directories. If directories are specified, adds all .flac and .mp3 files under those directories to the list.
-  -n <min>     Minimum display time for each image (default: ${color_var}${min_time}${color_reset} seconds).
+  -n <sec>     Display time for each image (default: ${color_var}${img_time}${color_reset} seconds).
   -p           Pause background music during video playback (requires -m).
-  -O           Only display videos, no images.
   -r           Randomize file order (mutually exclusive with -a, -x).
   -R           Recurse subdirectories when gathering image files.
-  -s <seconds> Maximum display time for each image (default: ${color_var}${max_time}${color_reset} seconds).
-  -S           Add file path and name as a subtitle to videos.
   -t <seconds> Maximum playback time for videos (default: ${color_var}${video_duration}${color_reset} seconds).
+  -v           Enable verbose mode.
   -V           Include video files in the slideshow.
   -x           Sort files by modification date (mutually exclusive with -r).
   -z           Reverse file order (requires -a or -x).
@@ -76,25 +64,21 @@ EOF
     exit 1
 }
 
-while getopts ":a:CdD:Ghilm:n:pOrRs:St:Vxz" opt; do
+while getopts ":ad:hiIlm:n:prRt:vVxz" opt; do
     case ${opt} in
         a) sort_alpha=true ;;
-        C) enable_timer=true ;;
-        d) debug=true ;;
-        D) source_dir=$OPTARG ;;  
-        G) include_gifs=true ;;
+        d) source_dir=$OPTARG ;;  
         h) usage ;;
         i) include_info=true ;;
+        I) include_images=true ;;
         l) loop=true ;;
         m) IFS=',' read -r -a audio_files <<< "$OPTARG" ;;
-        n) min_time=$OPTARG ;;
+        n) img_time=$OPTARG ;;
         p) pause_audio=true ;;
-        O) only_videos=true ;;
         r) shuffle=true ;;
         R) recurse=true ;;
-        s) max_time=$OPTARG ;;
-        S) add_subtitles=true ;;
         t) video_duration=$OPTARG ;;
+        v) verbose=true ;;
         V) include_videos=true ;;
         x) sort_date=true ;;
         z) reverse=true ;;
@@ -102,52 +86,40 @@ while getopts ":a:CdD:Ghilm:n:pOrRs:St:Vxz" opt; do
     esac
 done
 
+if [[ "$include_images" != "true" && "$include_videos" != "true" ]]; then
+    error "Either -I (include images) or -V (include videos) must be specified." >&2
+    exit 1
+fi
+
 if ${pause_audio} && [[ ${#audio_files[@]} -eq 0 ]]; then
     error "The -p option requires background audio files to be specified with -m."
+    exit
 fi
 
 if ${shuffle} && { ${sort_alpha} || ${sort_date}; }; then
     error "The -r (shuffle) option cannot be used with -a (sort alphabetically) or -x (sort by date)."
+    exit
 fi
 
 if ${reverse} && ! { ${sort_alpha} || ${sort_date}; }; then
     error "The -z (reverse) option requires either -a (sort alphabetically) or -x (sort by date)."
+    exit
 fi
 
-if [[ "${only_videos}" == "true" ]] && { [[ "${include_gifs}" == "true" ]] || [[ ${#audio_files[@]} -gt 0 ]]; }; then
-    error "The -O (only videos) option cannot be used with -G (include GIFs) or -m (background audio files)."
-fi
 
-if ${include_videos} && ${only_videos}; then
-    error "The -V (include videos) option cannot be used with -O (only videos)."
-fi
-
-if ${pause_audio} && [[ ${#audio_files[@]} -eq 0 ]]; then
-    error "The -p option requires background audio files to be specified with -m."
-fi
-
-if ${shuffle} && ${sort_date}; then
-    error "The -r (randomize) option cannot be used with -x (sort by date)."
-fi
 
 if [[ ! -d "${source_dir}" ]]; then
     error "The specified directory ${color_var}${source_dir}${color_reset} does not exist or is not a directory."
+    exit
 fi
 
-if ${pause_audio} && [[ ${#audio_files[@]} -eq 0 ]]; then
-    error "The -p option requires audio files to be specified using -m."
-fi
-
-if [[ -n "$OPTARG" ]]; then
-    IFS=',' read -r -a audio_files <<< "$OPTARG"
-    for dir in "${audio_files[@]}"; do
-        if [[ -d "$dir" ]]; then
-            log "Adding audio files from directory: ${color_var}$dir${color_reset}"
-            mapfile -t new_audio_files < <(find "$dir" -type f \( -iname "*.flac" -o -iname "*.mp3" \))
-            audio_files+=("${new_audio_files[@]}")  # Add the found files to the existing list
-        fi
-    done
-fi
+for dir in "${audio_files[@]}"; do
+    if [[ -d "$dir" ]]; then
+        log "Adding audio files from directory: ${color_var}$dir${color_reset}"
+        mapfile -t new_audio_files < <(find "$dir" -type f \( -iname "*.flac" -o -iname "*.mp3" \))
+        audio_files+=("${new_audio_files[@]}")  # Add the found files to the existing list
+    fi
+done
 
 cleanup() {
     log "Cleaning up and exiting..."
@@ -165,7 +137,7 @@ validate_dependencies() {
     if ! command -v convert &> /dev/null; then
         missing_deps+=("imagemagick")
     fi
-    if ${include_videos} || ${include_gifs} || [[ ${#audio_files[@]} -gt 0 ]]; then
+    if ${include_videos} || [[ ${#audio_files[@]} -gt 0 ]]; then
         if ! command -v mpv &> /dev/null; then
             missing_deps+=("mpv")
         fi
@@ -181,29 +153,40 @@ validate_dependencies() {
 
 gather_files() {
     files=()
+    local find_cmd="find \"${source_dir}\""
 
-    if [[ "${only_videos}" != "true" ]]; then
-        if ${recurse}; then
-            mapfile -t files < <(find "${source_dir}" -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.bmp' -o -iname '*.gif' \))
-        else
-            mapfile -t files < <(find "${source_dir}" -maxdepth 1 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.bmp' -o -iname '*.gif' \))
-        fi
+    # Adjust max depth if not recursing
+    if [[ "${recurse}" != "true" ]]; then
+        find_cmd+=" -maxdepth 1"
     fi
 
-    if ${include_videos}; then
-        if ${recurse}; then
-            mapfile -t video_files < <(find "${source_dir}" -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.webm' \))
-        else
-            mapfile -t video_files < <(find "${source_dir}" -maxdepth 1 -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.webm' \))
-        fi
-        files+=("${video_files[@]}")
+    # Start constructing the file type filters
+    find_cmd+=" -type f \\( -iname "
+
+    # Add image filters if not only_videos
+    if [[ "${include_images}" == "true" ]]; then
+        find_cmd+=" '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.bmp' -o -iname '*.gif'"
     fi
+
+    # Add video filters if include_videos
+    if [[ "${include_videos}" == "true" ]]; then
+        if [[ "${include_images}" == "true" ]]; then
+            find_cmd+=" -o"
+        fi
+
+        find_cmd+=" -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.webm'"
+    fi
+
+    find_cmd+=" \\)"
+    log "Gathering files..."
+
+    # Execute the command and populate the array
+    mapfile -t files < <(eval "${find_cmd}")
 
     if [[ ${#files[@]} -eq 0 ]]; then
         error "No files found in the specified directory."
+        exit 1
     fi
-
-    debug "Gathered files: ${color_var}${files[*]}${color_reset}"
 
     if ${loop} && [[ ${#files[@]} -eq 0 ]]; then
         error "The slideshow cannot loop because no files were found."
@@ -264,62 +247,44 @@ monitor_exit() {
 run_slideshow() {
     log "Starting slideshow..."
     start_audio
-    trap cleanup INT TERM  # Handle Ctrl+C or termination
+    trap cleanup INT TERM 
 
-    # Main loop for slideshow
     while :; do
         for file in "${files[@]}"; do
-            # Check if it's an image file
             if [[ "${file}" =~ \.(jpg|jpeg|png|bmp|gif)$ ]]; then
                 local display_file="$file"
-                log "Displaying image ${color_var}${display_file}${color_reset} for ${color_var}${max_time}${color_reset} seconds."
-
-#                feh --auto-zoom --auto-rotate --fullscreen --borderless --image-bg black -D "${max_time}" --on-last-slide quit \
-#                    $( [ "$include_info" = true ] && echo "--info \"bash -c '$info_cmd'\"" ) "$display_file" &
-
-                feh --auto-zoom --auto-rotate --fullscreen --borderless --image-bg black -D 5 --on-last-slide quit \
+                log "Displaying image ${color_var}${display_file}${color_reset} for ${color_var}${img_time}${color_reset} second(s)."
+                feh --auto-zoom --auto-rotate --fullscreen --borderless --image-bg black -D "${img_time}" --on-last-slide quit \
                     --info "bash -c 'realpath \"$file\"'" "$file" &
-
-
-
                 feh_pid=$!
-                [[ ${enable_timer} == true ]] && countdown_timer "${max_time}"
+                countdown_timer "${img_time}"
                 wait "${feh_pid}"
-            # Check if it's a video file
             elif [[ "${file}" =~ \.(mp4|mkv|avi|webm)$ ]]; then
                 log "Playing video ${color_var}${file}${color_reset} for up to ${color_var}${video_duration}${color_reset} seconds."
-
-                # Initialize the mpv command
                 mpv_cmd="mpv --fs --audio-device=pulse --hwdec=auto-safe --msg-level=vo/gpu=warn --fs --hwdec=auto-safe --vo=gpu --gpu-context=wayland"
 
                 if [[ ${video_duration} -ne 0 ]]; then
                     mpv_cmd+=" --length=${video_duration}"
                 fi
 
-                # Only create subtitle file if -S option is set
-                if ${add_subtitles}; then
+                if ${include_info}; then
                     subtitle_file=$(mktemp "/tmp/$(basename "${file%.*}").XXXXXX.srt")
                     echo "1" > "${subtitle_file}"  # Subtitle index
                     echo "00:00:00,000 --> 00:00:10,000" >> "${subtitle_file}"  # Time format (adjust duration if needed)
                     realpath --relative-to="${source_dir}" "$file" >> "${subtitle_file}"  
-                    mpv_cmd="$mpv_cmd --sub-file=\"${subtitle_file}\""
+                    mpv_cmd+=" --sub-file=\"${subtitle_file}\""
                     log "Subtitle file ${color_var}${subtitle_file}${color_reset} created."
                 fi
 
-                # Add the video file to the command
-                mpv_cmd="$mpv_cmd \"$(realpath "$file")\""
+                mpv_cmd+=" \"$(realpath "$file")\""
                 if ${pause_audio} && [[ -n ${audio_pid} ]]; then
                     log "Pausing background music."
                     kill -SIGSTOP "${audio_pid}"  # Pause audio playback
                 fi
 
-                # Execute the constructed mpv command
-#                eval "$mpv_cmd --profile=fast --hwdec=auto-safe"
-echo $mpv_cmd
                 eval "$mpv_cmd" 
 
-                # Clean up the temporary subtitle file after playback (if created)
-                if ${add_subtitles}; then
+                if ${include_info}; then
                     rm -f "${subtitle_file}"
                 fi
 
@@ -344,7 +309,7 @@ main() {
     validate_dependencies
     gather_files
     sort_and_shuffle_files
-    debug "Files to display: ${color_var}${files[*]}${color_reset}"
+    log "Files to display: ${color_var}${files[*]}${color_reset}"
     run_slideshow
 }
 

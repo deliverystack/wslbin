@@ -2,6 +2,8 @@
 # https://chatgpt.com/share/673f52a5-4f04-8005-b334-bdbeafc8ddd6
 # ~/git/wslbin/bin/playmed.bash -s 3 -C -d -G -l -r -R -t 3 -V -I -D "/mnt/d/from-onetouch/media/ByYear/2023" -m '/mnt/d/mp3s/XTC'
 
+
+
 export NO_FOCUS=true
 script_name=$(basename "$0")
 trap cleanup INT TERM

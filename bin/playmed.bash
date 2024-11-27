@@ -1,9 +1,5 @@
 #!/usr/bin/bash 
 
-# https://chatgpt.com/share/673f52a5-4f04-8005-b334-bdbeafc8ddd6
-# ~/git/wslbin/bin/playmed.bash -s 3 -C -d -G -l -r -R -t 3 -V -I -D "/mnt/d/from-onetouch/media/ByYear/2023" -m '/mnt/d/mp3s/XTC'
-
-export NO_FOCUS=true
 script_name=$(basename "$0")
 trap cleanup INT TERM
 color_reset=$(tput sgr0)
@@ -106,8 +102,6 @@ if ${reverse} && ! { ${sort_alpha} || ${sort_date}; }; then
     exit
 fi
 
-
-
 if [[ ! -d "${source_dir}" ]]; then
     error "The specified directory ${color_var}${source_dir}${color_reset} does not exist or is not a directory."
     exit
@@ -117,7 +111,7 @@ for dir in "${audio_files[@]}"; do
     if [[ -d "$dir" ]]; then
         log "Adding audio files from directory: ${color_var}$dir${color_reset}"
         mapfile -t new_audio_files < <(find "$dir" -type f \( -iname "*.flac" -o -iname "*.mp3" \))
-        audio_files+=("${new_audio_files[@]}")  # Add the found files to the existing list
+        audio_files+=("${new_audio_files[@]}")
     fi
 done
 
@@ -131,16 +125,13 @@ cleanup() {
 
 validate_dependencies() {
     local missing_deps=()
+
     if ! command -v feh &> /dev/null; then
         missing_deps+=("feh")
     fi
-    if ! command -v convert &> /dev/null; then
-        missing_deps+=("imagemagick")
-    fi
-    if ${include_videos} || [[ ${#audio_files[@]} -gt 0 ]]; then
-        if ! command -v mpv &> /dev/null; then
-            missing_deps+=("mpv")
-        fi
+
+    if ! command -v mpv &> /dev/null; then
+        missing_deps+=("mpv")
     fi
 
     if [[ ${#missing_deps[@]} -gt 0 ]]; then
@@ -155,20 +146,16 @@ gather_files() {
     files=()
     local find_cmd="find \"${source_dir}\""
 
-    # Adjust max depth if not recursing
     if [[ "${recurse}" != "true" ]]; then
         find_cmd+=" -maxdepth 1"
     fi
 
-    # Start constructing the file type filters
     find_cmd+=" -type f \\( -iname "
 
-    # Add image filters if not only_videos
     if [[ "${include_images}" == "true" ]]; then
         find_cmd+=" '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.bmp' -o -iname '*.gif'"
     fi
 
-    # Add video filters if include_videos
     if [[ "${include_videos}" == "true" ]]; then
         if [[ "${include_images}" == "true" ]]; then
             find_cmd+=" -o"
@@ -179,18 +166,11 @@ gather_files() {
 
     find_cmd+=" \\)"
     log "Gathering files..."
-
-    # Execute the command and populate the array
     mapfile -t files < <(eval "${find_cmd}")
 
     if [[ ${#files[@]} -eq 0 ]]; then
-        error "No files found in the specified directory."
+        error "No relevant files found in ${source_dir}."
         exit 1
-    fi
-
-    if ${loop} && [[ ${#files[@]} -eq 0 ]]; then
-        error "The slideshow cannot loop because no files were found."
-        exit
     fi
 }
 
@@ -269,8 +249,10 @@ run_slideshow() {
 
                 if ${include_info}; then
                     subtitle_file=$(mktemp "/tmp/$(basename "${file%.*}").XXXXXX.srt")
-                    echo "1" > "${subtitle_file}"  # Subtitle index
-                    echo "00:00:00,000 --> 00:00:10,000" >> "${subtitle_file}"  # Time format (adjust duration if needed)
+                    echo "1" > "${subtitle_file}"  
+
+                    #//TODO: why is this hard-coded? and why doesn't it seem to work?
+                    echo "00:00:00,000 --> 99:59:59,999" >> "${subtitle_file}"  
                     realpath --relative-to="${source_dir}" "$file" >> "${subtitle_file}"  
                     mpv_cmd+=" --sub-file=\"${subtitle_file}\""
                     log "Subtitle file ${color_var}${subtitle_file}${color_reset} created."
@@ -279,7 +261,7 @@ run_slideshow() {
                 mpv_cmd+=" \"$(realpath "$file")\""
                 if ${pause_audio} && [[ -n ${audio_pid} ]]; then
                     log "Pausing background music."
-                    kill -SIGSTOP "${audio_pid}"  # Pause audio playback
+                    kill -SIGSTOP "${audio_pid}" 
                 fi
 
                 eval "$mpv_cmd" 
@@ -290,12 +272,11 @@ run_slideshow() {
 
                 if ${pause_audio} && [[ -n ${audio_pid} ]]; then
                     log "Resuming background music."
-                    kill -SIGCONT "${audio_pid}"  # Resume audio playback
+                    kill -SIGCONT "${audio_pid}" 
                 fi
             fi
         done
 
-        # If loop is enabled, reshuffle or restart slideshow
         if ! ${loop}; then
             break
         fi

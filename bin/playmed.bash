@@ -60,6 +60,52 @@ EOF
     exit 1
 }
 
+display_parsed_options() {
+    log "Parsed options:"
+    log "  Image time: ${color_var}${img_time}${color_reset} seconds"
+    log "  Video duration: ${color_var}${video_duration}${color_reset} seconds"
+    log "  Shuffle: ${color_var}${shuffle}${color_reset}"
+    log "  Verbose mode: ${color_var}${verbose}${color_reset}"
+    log "  Reverse order: ${color_var}${reverse}${color_reset}"
+    log "  Sort alphabetically: ${color_var}${sort_alpha}${color_reset}"
+    log "  Sort by date: ${color_var}${sort_date}${color_reset}"
+    log "  Loop: ${color_var}${loop}${color_reset}"
+    log "  Include videos: ${color_var}${include_videos}${color_reset}"
+    log "  Include images: ${color_var}${include_images}${color_reset}"
+    log "  Source directory: ${color_var}${source_dir}${color_reset}"
+    log "  Audio files: ${color_var}${audio_files[*]}${color_reset}"
+    log "  Include info: ${color_var}${include_info}${color_reset}"
+    log "  Pause audio: ${color_var}${pause_audio}${color_reset}"
+
+    log "Based on the provided options:"
+    if ${include_images}; then
+        log "  - Images will be included in the slideshow."
+    fi
+    if ${include_videos}; then
+        log "  - Videos will be included in the slideshow."
+    fi
+    if ${sort_alpha}; then
+        log "  - Files will be sorted alphabetically."
+    elif ${sort_date}; then
+        log "  - Files will be sorted by modification date."
+    elif ${shuffle}; then
+        log "  - Files will be randomized."
+    fi
+    if ${reverse}; then
+        log "  - File order will be reversed."
+    fi
+    if ${loop}; then
+        log "  - The slideshow will loop after completion."
+    fi
+    if [[ ${#audio_files[@]} -gt 0 ]]; then
+        log "  - Background audio will play during the slideshow."
+        if ${pause_audio}; then
+            log "  - Audio playback will pause during video playback."
+        fi
+    fi
+    log "Starting slideshow setup..."
+}
+
 declare -A seen_options
 options_with_values="d m n t"
 
@@ -133,51 +179,11 @@ if [[ ! -d "${source_dir}" ]]; then
     exit
 fi
 
-log "Parsed options:"
-log "  Image time: ${color_var}${img_time}${color_reset} seconds"
-log "  Video duration: ${color_var}${video_duration}${color_reset} seconds"
-log "  Shuffle: ${color_var}${shuffle}${color_reset}"
-log "  Verbose mode: ${color_var}${verbose}${color_reset}"
-log "  Reverse order: ${color_var}${reverse}${color_reset}"
-log "  Sort alphabetically: ${color_var}${sort_alpha}${color_reset}"
-log "  Sort by date: ${color_var}${sort_date}${color_reset}"
-log "  Loop: ${color_var}${loop}${color_reset}"
-log "  Include videos: ${color_var}${include_videos}${color_reset}"
-log "  Include images: ${color_var}${include_images}${color_reset}"
-log "  Source directory: ${color_var}${source_dir}${color_reset}"
-log "  Audio files: ${color_var}${audio_files[*]}${color_reset}"
-log "  Include info: ${color_var}${include_info}${color_reset}"
-log "  Pause audio: ${color_var}${pause_audio}${color_reset}"
+if ${verbose}; then
+    display_parsed_options
+fi
 
-# Explain what the script will do
-log "Based on the provided options:"
-if ${include_images}; then
-    log "  - Images will be included in the slideshow."
-fi
-if ${include_videos}; then
-    log "  - Videos will be included in the slideshow."
-fi
-if ${sort_alpha}; then
-    log "  - Files will be sorted alphabetically."
-elif ${sort_date}; then
-    log "  - Files will be sorted by modification date."
-elif ${shuffle}; then
-    log "  - Files will be randomized."
-fi
-if ${reverse}; then
-    log "  - File order will be reversed."
-fi
-if ${loop}; then
-    log "  - The slideshow will loop after completion."
-fi
-if [[ ${#audio_files[@]} -gt 0 ]]; then
-    log "  - Background audio will play during the slideshow."
-    if ${pause_audio}; then
-        log "  - Audio playback will pause during video playback."
-    fi
-fi
 log "Starting slideshow setup..."
-
 
 for dir in "${audio_files[@]}"; do
     if [[ -d "$dir" ]]; then

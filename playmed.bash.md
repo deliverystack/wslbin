@@ -1,7 +1,6 @@
 # playmed.bash: WSL Bash Shell Script for Image/Video/Audio Slideshow
 
-Clippy 2.0 I and I wrote a Bash shell script to render a slideshow from the images and videos under a directory. It makes it worth pulling the media from my phone, and the kids love it. I haven’t tested much, but according to Clippy:
-
+Clippy 2.0 I and I wrote a Bash shell script to render a slideshow from the images and videos under a root directory. It makes it worth pulling the media from the phones to a PC, and the kids love it. I haven’t tested much, and only under WSL and Ubuntu itself, but according to Clippy:
 
 # Multimedia Slideshow Script
 
@@ -54,7 +53,7 @@ The script:
 ## Usage
 Run the script with the desired options. For example:
 ```bash
-./slideshow.bash -d /path/to/files -I -V -m background.mp3 -n 10 -r -l
+./playmed.bash -d /path/to/files -I -V -m background.mp3 -n 10 -r -l
 ```
 
 This command:

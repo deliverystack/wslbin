@@ -319,10 +319,7 @@ run_slideshow() {
                 wait "${feh_pid}"
             elif [[ "${file}" =~ \.(mp4|mkv|avi|webm)$ ]]; then
                 log "Playing video ${color_var}${file}${color_reset} for up to ${color_var}${video_duration}${color_reset} seconds."
-#                mpv_cmd="mpv --fs --audio-device=pulse --hwdec=auto-safe --msg-level=vo/gpu=warn --fs --hwdec=auto-safe"
-
                 mpv_cmd="mpv --fs --audio-device=pulse --hwdec=auto-safe --msg-level=vo/gpu=warn --fs --hwdec=no --gpu-api=opengl"
-
 
                 if [[ ${video_duration} -ne 0 ]]; then
                     mpv_cmd+=" --length=${video_duration}"
@@ -331,8 +328,6 @@ run_slideshow() {
                 if ${include_info}; then
                     subtitle_file=$(mktemp "/tmp/$(basename "${file%.*}").XXXXXX.srt")
                     echo "1" > "${subtitle_file}"  
-
-                    #//TODO: why is this hard-coded? and why doesn't it seem to work?
                     echo "00:00:00,000 --> 99:59:59,999" >> "${subtitle_file}"  
                     realpath --relative-to="${source_dir}" "$file" >> "${subtitle_file}"  
                     mpv_cmd+=" --sub-file=\"${subtitle_file}\""
@@ -345,7 +340,6 @@ run_slideshow() {
                     kill -SIGSTOP "${audio_pid}" 
                 fi
 
-echo $mpv_cmd
                 eval "$mpv_cmd" 
 
                 if ${include_info}; then

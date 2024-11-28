@@ -60,7 +60,33 @@ EOF
     exit 1
 }
 
+declare -A seen_options
+options_with_values="d m n t"
+
 while getopts ":ad:hiIlm:n:prRt:vVxz" opt; do
+    if [[ "${opt}" == ":" ]]; then
+        error "Option -${OPTARG} requires an argument"
+        exit 1
+    fi
+
+    # Check for duplicate options
+    if [[ -n "${seen_options[${opt}]}" ]]; then
+        error "Option -${opt} specified multiple times"
+        exit 1
+    fi
+    seen_options[${opt}]=1  # Mark the option as seen
+
+    # List of options that require values
+
+    # Validate options that require values
+    if [[ "${options_with_values}" == *"${opt}"* ]]; then
+        # If OPTARG is empty or begins with a dash, it's invalid
+        if [[ -z "${OPTARG}" || "${OPTARG}" == -* ]]; then
+            error "Error: Missing or invalid value for -${opt} option"
+            exit 1
+        fi
+    fi
+
     case ${opt} in
         a) sort_alpha=true ;;
         d) source_dir=$OPTARG ;;  
@@ -158,10 +184,10 @@ gather_files() {
 
     if [[ "${include_videos}" == "true" ]]; then
         if [[ "${include_images}" == "true" ]]; then
-            find_cmd+=" -o"
+            find_cmd+=" -o -iname"
         fi
 
-        find_cmd+=" -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.webm'"
+        find_cmd+=" '*.mp4' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.webm'"
     fi
 
     find_cmd+=" \\)"
@@ -241,7 +267,10 @@ run_slideshow() {
                 wait "${feh_pid}"
             elif [[ "${file}" =~ \.(mp4|mkv|avi|webm)$ ]]; then
                 log "Playing video ${color_var}${file}${color_reset} for up to ${color_var}${video_duration}${color_reset} seconds."
-                mpv_cmd="mpv --fs --audio-device=pulse --hwdec=auto-safe --msg-level=vo/gpu=warn --fs --hwdec=auto-safe"
+#                mpv_cmd="mpv --fs --audio-device=pulse --hwdec=auto-safe --msg-level=vo/gpu=warn --fs --hwdec=auto-safe"
+
+                mpv_cmd="mpv --fs --audio-device=pulse --hwdec=auto-safe --msg-level=vo/gpu=warn --fs --hwdec=no --gpu-api=opengl"
+
 
                 if [[ ${video_duration} -ne 0 ]]; then
                     mpv_cmd+=" --length=${video_duration}"
@@ -264,6 +293,7 @@ run_slideshow() {
                     kill -SIGSTOP "${audio_pid}" 
                 fi
 
+echo $mpv_cmd
                 eval "$mpv_cmd" 
 
                 if ${include_info}; then

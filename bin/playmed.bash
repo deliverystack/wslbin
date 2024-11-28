@@ -241,7 +241,7 @@ run_slideshow() {
                 wait "${feh_pid}"
             elif [[ "${file}" =~ \.(mp4|mkv|avi|webm)$ ]]; then
                 log "Playing video ${color_var}${file}${color_reset} for up to ${color_var}${video_duration}${color_reset} seconds."
-                mpv_cmd="mpv --fs --audio-device=pulse --hwdec=auto-safe --msg-level=vo/gpu=warn --fs --hwdec=auto-safe --vo=gpu --gpu-context=wayland"
+                mpv_cmd="mpv --fs --audio-device=pulse --hwdec=auto-safe --msg-level=vo/gpu=warn --fs --hwdec=auto-safe"
 
                 if [[ ${video_duration} -ne 0 ]]; then
                     mpv_cmd+=" --length=${video_duration}"
@@ -286,12 +286,8 @@ run_slideshow() {
     done
 }
 
-main() {
-    validate_dependencies
-    gather_files
-    sort_and_shuffle_files
-    log "Files to display: ${color_var}${files[*]}${color_reset}"
-    run_slideshow
-}
-
-main
+validate_dependencies
+gather_files
+sort_and_shuffle_files
+log "Files to display: ${color_var}${files[*]}${color_reset}"
+run_slideshow

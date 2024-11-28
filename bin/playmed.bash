@@ -161,7 +161,7 @@ gather_files() {
             find_cmd+=" -o"
         fi
 
-        find_cmd+=" '*.mp4' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.webm'"
+        find_cmd+=" -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.webm'"
     fi
 
     find_cmd+=" \\)"

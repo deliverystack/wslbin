@@ -4,6 +4,10 @@ This short clog introduces the jd Bash shell function that enhances the cd comma
 
 - https://github.com/deliverystack/wslbin/blob/main/bin/jd.bash
 
+
+![Screen capture of using jd](img/jd.png "Screen capture of using jd")
+
+
 You can use the jd function just as you would the cd command. You can alias cd to the jd function so that you get this behavior without having to retrain your fingers to type jd instead of cd. This function uses $HOME/.jd.lst to store directory paths.
 
 If you pass a Windows path such as `C:` or `\\wsl.localhost\Ubuntu\` the function will use the wslpath command to convert them to the corresponding Unix paths.

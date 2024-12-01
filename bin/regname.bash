@@ -1,5 +1,6 @@
 #!/usr/bin/bash
 
+
 shopt -s globstar
 
 # Set script name
@@ -37,6 +38,8 @@ debug() {
     fi
 }
 
+declare -A renamed_dirs  # Track renamed directories globally
+
 resolve_renamed_path() {
     local original_path="$1"
     local relative_path="${original_path#"${source_dir}/"}"
@@ -49,12 +52,15 @@ resolve_renamed_path() {
     IFS='/' read -ra path_parts <<< "${relative_path}"
 
     for part in "${path_parts[@]}"; do
-        if [ -d "${source_dir}/${part}" ] && [ "${disable_rename_directories}" -eq 1 ]; then
-            # Keep the original name if renaming directories is disabled
-            renamed_part="${part}"
+        # Check if the part has already been renamed
+        if [[ -v "renamed_dirs[${part}]" ]]; then
+            renamed_part="${renamed_dirs[${part}]}"
         else
             clean_name "${part}"
             renamed_part="${REPLY}"
+
+            # Track the renamed part to avoid inconsistent random renames
+            renamed_dirs["${part}"]="${renamed_part}"
         fi
 
         debug "Original part: ${part}, Renamed part: ${renamed_part}"
@@ -63,6 +69,65 @@ resolve_renamed_path() {
 
     debug "Final resolved path: ${renamed_path}"
     REPLY="${renamed_path}"
+}
+
+
+clean_name() {
+    local original="$1"
+    local base
+    local ext=""
+    local cleaned
+
+    debug "Processing file: ${original}"
+
+    # Split the filename into base and extension
+    if [ -d "$original" ]; then
+        base="$original"
+        debug "Detected directory. Using base: ${base}"
+    else
+        base="${original%.*}"
+        ext="${original##*.}"
+
+        if [[ "$base" == "$original" ]]; then
+            ext=""
+        fi
+        debug "Split name into base: '${base}', extension: '${ext}'"
+    fi
+
+    # Skip renaming for ignored extensions
+    for ignored_ext in "${ignore_ext_array[@]}"; do
+        if [[ "${ext,,}" == "${ignored_ext,,}" ]]; then
+            debug "Skipping file due to ignored extension: ${ext}"
+            REPLY="$original"
+            return
+        fi
+    done
+
+    # Sanitize the name
+    cleaned=$(echo "$base" | sed -E "
+        s|[^a-zA-Z0-9.-]|-|g;  # Replace invalid characters (excluding underscores)
+        s|-{2,}|-|g;           # Remove repeated dashes
+        s|[-]$||g;             # Remove trailing dashes
+    " | tr '[:upper:]' '[:lower:]')
+
+    # Apply minimum length check unless disabled
+    if [ "${disable_length_check}" -eq 0 ] && [ "${#cleaned}" -lt 3 ]; then
+        # Use a consistent name for directories
+        if [[ -v "renamed_dirs[${original}]" ]]; then
+            cleaned="${renamed_dirs[${original}]}"
+        else
+            cleaned="dir-${RANDOM}"
+            renamed_dirs["${original}"]="${cleaned}"
+        fi
+    fi
+
+    # Reattach the extension for files
+    if [[ -n "$ext" && ! -d "$original" ]]; then
+        cleaned="${cleaned}.${ext}"
+    fi
+
+    REPLY="$cleaned"
+    return
 }
 
 clean_name() {

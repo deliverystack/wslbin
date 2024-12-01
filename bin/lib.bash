@@ -1,8 +1,9 @@
 #!/bin/bash
 script_name=$(basename "$0")
+set -u
 
 log_output="both"  # Options: screen, file, both
-log_file="/tmp/${script_name}.$$.$USER.$(date +%Y%m%d%H%M%S).log"
+log_file="$HOME/${script_name}.log"
 debug=true  # Debug mode off by default
 verbose=true  # Verbose mode off by default
 
@@ -10,14 +11,14 @@ red_color=$(tput setaf 1)
 green_color=$(tput setaf 2)
 orange_color=$(tput setaf 3)
 yellow_color=$(tput setaf 3)
-blue_color=$(tput setaf 4)
+cyan_color=$(tput setaf 6)
 reset_color=$(tput sgr0)
 
 red() { printf "${red_color}%s${reset_color}" "$1"; }
 green() { printf "${green_color}%s${reset_color}" "$1"; }
 orange() { printf "${orange_color}%s${reset_color}" "$1"; }
 yellow() { printf "${yellow_color}%s${reset_color}" "$1"; }
-blue() { printf "${blue_color}%s${reset_color}" "$1"; }
+cyan() { printf "${cyan_color}%s${reset_color}" "$1"; }
 
 log_message() {
     local level="$1"
@@ -57,6 +58,12 @@ error() {
     log_message "$level" "$color" "$@"
 }
 
+progress() {
+    local level="PROGRESS"
+    local color="$cyan_color"
+    log_message "$level" "$color" "$@"
+}
+
 debug() {
     local level="DEBUG"
     local color="$yellow_color"
@@ -71,6 +78,50 @@ sanitize_name_part() {
         s|^-||g;               # Remove leading dashes
         s|-$||g;               # Remove trailing dashes
     " | tr '[:upper:]' '[:lower:]'
+}
+
+validate_dependencies() {
+    local exit_on_fail=0
+    local dependencies=()
+    local missing_deps=()
+
+    # Parse options
+    while getopts ":x" opt; do
+        case ${opt} in
+            x)
+                exit_on_fail=1
+                ;;
+            \?)
+                error "Invalid option: -${OPTARG}"
+                return 1
+                ;;
+        esac
+    done
+    shift $((OPTIND -1))
+    
+    # Remaining arguments are dependencies
+    dependencies=("$@")
+
+    # Check each dependency
+    for dep in "${dependencies[@]}"; do
+        if ! command -v "${dep}" &> /dev/null; then
+            missing_deps+=("${dep}")
+        fi
+    done
+
+    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+        warn "Missing dependencies detected: ${missing_deps[*]}"
+        warn "To install the missing dependencies, try:"
+        warn "  sudo apt update && sudo apt install -y ${missing_deps[*]}"
+        
+        if [[ ${exit_on_fail} -eq 1 ]]; then
+            exit 1
+        else
+            return 1
+        fi
+    fi
+
+    return 0
 }
 
 clean_name() {
@@ -115,22 +166,40 @@ clean_name() {
 }
 
 run_command() {
-    local cmd=""
+    local args=("$@")
     local output_file=""
     local debug=false
     local verbose=false
-    local log_file="$HOME/cmd.log"
-    local result
-    local risk=false
-    local calling_script
-    local start_time
+    local run_flags=()
+    local use_time=false
 
-    # Parse arguments
+    local exit_on_error=false
+    local calling_script
+    local result
+
+    # Function for handling errors with exit logic
+    handle_error() {
+        local message="$1"
+        error "$message"
+        if $exit_on_error; then
+            error "Exiting script due to -x/--exit-on-error"
+            exit 1
+        else
+            return 1
+        fi
+    }
+
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
             -o|--output-file)
+                if [[ -z "$2" || "$2" == -* ]]; then
+                    handle_error "The -o/--output-file flag requires a valid file name as an argument." || return 1
+                fi
                 output_file="$2"
                 shift
+                ;;
+            -t|--time)
+                use_time=true
                 ;;
             -d|--debug)
                 debug=true
@@ -138,160 +207,126 @@ run_command() {
             -v|--verbose)
                 verbose=true
                 ;;
-            *)
-                cmd="$*"
-                break
+            -x|--exit-on-error)
+                exit_on_error=true
+                ;;
+            --) shift; break ;;  # End of run_command flags; break the loop
+            -*)
+                handle_error "Invalid or unsupported flag: $1" || return 1
                 ;;
         esac
         shift
     done
 
-    if [[ -z "$cmd" ]]; then
-        warn "No command provided to run_command"
-        return 1
+    debug "Received ${cyan_color}${args[*]}${reset_color}"
+    cmd=("$@")
+
+    # Validate the presence of a command
+    if [[ ${#cmd[@]} -eq 0 ]]; then
+        handle_error "No command provided to run_command" || return 1
     fi
 
-    # Get calling script and timestamp
+    # Validate -t usage
+    if $use_time && [[ -z "$output_file" && $verbose == false ]]; then
+        handle_error "The -t/--time flag requires output to be directed to the screen or a file." || return 1
+    fi
+
     calling_script="$(realpath "${BASH_SOURCE[1]}")"
-    start_time=$(date '+%Y-%m-%d %H:%M:%S')
+    info "${cyan_color}$calling_script${reset_color} invoking ${cyan_color}${cmd[*]}${reset_color}"
 
-    # Log command invocation
-    info "Executing command: \"$cmd\" from \"$calling_script\""
-
-    # Execute the command
-    if [[ -n "$output_file" ]]; then
-        debug "Saving command output to: $output_file"
-        eval "$cmd" 2>&1 | tee "$output_file" > /dev/tty
-    else
-        debug "No output file specified; command output will not be saved."
-        eval "$cmd" &>/dev/null
+    # Prefix the command with 'time' if -t is specified
+    if $use_time; then
+        cmd=("time" "${cmd[@]}")
     fi
 
-    result=${PIPESTATUS[0]}
-
-    # Detect risk based on command output
-    if [[ -n "$output_file" && -f "$output_file" ]]; then
-        if grep -qiE 'error|warning' "$output_file"; then
-            risk=true
+    if [[ -n "$output_file" ]]; then
+        debug "Saving command output to ${cyan_color}$output_file${reset_color}"
+        if $use_time; then
+            { time "${cmd[@]}" > >(tee -a "$output_file") 2>&1; } 2> >(tee -a "$output_file" >&2)
+        else
+            "${cmd[@]}" 2>&1 | tee -- "$output_file"
+        fi
+    else
+        if $verbose; then
+            debug "No output file specified; command output will be displayed on screen."
+            if $use_time; then
+                time "${cmd[@]}"
+            else
+                "${cmd[@]}"
+            fi
+        else
+            debug "No output file specified; command output will not be displayed."
+            if $use_time; then
+                time "${cmd[@]}" &>/dev/null
+            else
+                "${cmd[@]}" &>/dev/null
+            fi
         fi
     fi
+    
+    result=${PIPESTATUS[0]}
 
-    # Log command metadata (excluding output)
-    info "Command completed: \"$cmd\" (Result: $result, Risk: $risk)"
-    {
-        echo "  {"
-        echo "    \"timestamp\": \"$start_time\","
-        echo "    \"calling_script\": \"$calling_script\","
-        echo "    \"command\": \"$cmd\","
-        echo "    \"result\": $result,"
-        echo "    \"risk\": $risk"
-        echo "  }"
-    } >> "$log_file"
+    # Handle command execution errors
+    if [[ "$result" -ne 0 ]]; then
+        handle_error "Command failed with exit code $result" || return 1
+    fi
 
-    # Do not print JSON to the screen
-    local output_file_json="${output_file:-null}"
-    echo "{\"result\": $result, \"risk\": $risk, \"output_file\": \"$output_file_json\"}"
-    printf '{"result": %d, "risk": %s, "output_file": "%s"}\n' "$result" "$risk" "$output_file_json" >> "$log_file"
+    return "$result"
 }
 
 self_check() {
     local calling_script
     calling_script=$(realpath "${BASH_SOURCE[0]}")
-    local json
-    # Execute ShellCheck and capture JSON output
-    json=$(run_command -v shellcheck "$calling_script")
 
-    # Validate JSON
-    if ! jq -e . <<<"$json" >/dev/null 2>&1; then
-        error "Error: Invalid JSON output from run_command:"
-        echo "$json"
-        return 1
-    fi
+    # Create a temporary file for ShellCheck output
+    local temp_file
+    temp_file=$(mktemp)
 
-    # Extract result and risk
-    local result risk output_file
-    result=$(jq -r '.result' <<<"$json")
-    risk=$(jq -r '.risk' <<<"$json")
-    output_file=$(jq -r '.output_file // null' <<<"$json")
+    # Execute ShellCheck and capture output in the temporary file
+    run_command -o "$temp_file" -x -t -d -v shellcheck "$calling_script"
+    local result=$?
 
-    # Display results
-    if [[ "$result" -eq 0 && "$risk" == "false" ]]; then
-        debug "ShellCheck passed successfully."
+    # Check the temp file for errors or warnings
+    if [[ "$result" -ne 0 || $(grep -qiE 'error|warning' "$temp_file"; echo $?) -eq 0 ]]; then
+        warn "ShellCheck detected issues:"
+        cat "$temp_file"  # Display the output
     else
-        warn "ShellCheck reported issues:"
-        if [[ "$output_file" != "null" && -n "$output_file" && -f "$output_file" ]]; then
-            cat "$output_file"
-        elif [[ "$output_file" != "null" && -n "$output_file" && -f "$output_file" ]]; then
-            cat "$output_file"
-        else
-            warn "No output available. Pass -o or --output-file to run_command to capture output."
-        fi
+        info "ShellCheck passed successfully with no warnings or errors."
     fi
+
+    # Clean up the temporary file
+    rm -f "$temp_file"
 }
 
-# Example usage of the script
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-    debug=true  # Enable debug for testing
-    verbose=true  # Enable verbose for testing
+test() {
+    if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+        debug=true 
+        verbose=true
+        info "Starting script self-check using ShellCheck..."
+        self_check
 
-    info "Starting script self-check using ShellCheck..."
-    self_check
+        # Prepare flags for run_command
+    flags=()
+    [[ "$debug" == true ]] && flags+=("-d")
+    [[ "$verbose" == true ]] && flags+=("-v")
+        # Execute invalid command
+        run_command "${flags[@]}" --invalid
+        result=$?
 
-    json=$(run_command --invalid)
-
-    # Parse the result and check for errors
-    if ! jq -e . <<<"$json" >/dev/null 2>&1; then
-        error "Error: Invalid JSON output from run_command:"
-        debug "$json"
-    else
-        result=$(jq -r '.result' <<<"$json")
-        risk=$(jq -r '.risk' <<<"$json")
-        output_file=$(jq -r '.output_file // null' <<<"$json")
-
-        if [[ "$result" -ne 0 || "$risk" == "true" ]]; then
-            error "Command failed with result: $result and risk: $risk."
-            if [[ "$output_file" != "null" && -f "$output_file" ]]; then
-                warn "Command output saved in: $output_file"
-            else
-                warn "No output available. Use -o to capture output."
-            fi
-        else
-            info "Command executed successfully."
-            if [[ "$output_file" != "null" && -f "$output_file" ]]; then
-                info "Command output saved in: $output_file"
-            fi
+        if [[ "$result" -ne 0 ]]; then
+            error "Invalid command failed as expected (Exit code: $result)."
         fi
-    fi
 
-    # Run a non-existent directory listing command to demonstrate error handling
-    json=$(run_command ls /nonexistent_directory)
+        # Execute command with a nonexistent directory
+        run_command "${flags[@]}" ls /nonexistent_directory
+        result=$?
 
-    # Parse the result and check for errors
-    if ! jq -e . <<<"$json" >/dev/null 2>&1; then
-        error "Error: Invalid JSON output from run_command:"
-        debug "$json"
-    else
-        result=$(jq -r '.result' <<<"$json")
-        risk=$(jq -r '.risk' <<<"$json")
-        output_file=$(jq -r '.output_file // null' <<<"$json")
-
-        if [[ "$result" -ne 0 || "$risk" == "true" ]]; then
-            error "Command failed with result: $result and risk: $risk."
-            if [[ "$output_file" != "null" && -f "$output_file" ]]; then
-                warn "Command output saved in: $output_file"
-            else
-                warn "No output available. Use -o to capture output."
-            fi
-        else
-            info "Command executed successfully."
-            if [[ "$output_file" != "null" && -f "$output_file" ]]; then
-                info "Command output saved in: $output_file"
-            fi
+        if [[ "$result" -ne 0 ]]; then
+            error "Command failed as expected (Exit code: $result)."
         fi
+
+        info "Sanitizing a sample filename..."
+        sanitized_name=$(clean_name " Example--File!@Name  ")
+        info "Sanitized filename: $(cyan "${sanitized_name}")"
     fi
-    info "Sanitizing a sample filename..."
-    sanitized_name=$(clean_name " Example--File!@Name  ")
-    info "Sanitized filename: $(blue "${sanitized_name}")"
-fi
-
-
+}

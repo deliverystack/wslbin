@@ -3,7 +3,7 @@
 
 jd() {
     func_name="${FUNCNAME[0]}"
-    dir_file="${HOME}/.${func_name}.lst"
+    dir_file="${HOME}/.${func_name}.config"
     touch "${dir_file}"
 
     resolve_path() {
@@ -29,41 +29,79 @@ jd() {
     local cd_opts=""
     local target_dir=""
     local args=()
+    local add_descendants=false
+    local remove_arg=""
+    local line_number=""
+    local list_after_remove=false
+
+    # Color codes
+    cyan="\033[0;36m"
+    orange="\033[0;33m"
+    green="\033[0;32m"
+    reset="\033[0m"
 
     # Collect options and positional arguments
     while [[ "$1" ]]; do
+        if [[ "$1" =~ ^-[^-] && ${#1} -gt 2 ]]; then
+            echo "Error: Options must not be combined. Received: $1" >&2
+            return 1
+        fi
         case "$1" in
-            -L|-P|-e|-@) cd_opts+=" $1" ;;  # Collect options
-            -h)
-                cat <<EOF
-Usage: ${func_name} [-L|-P|-e|-@] [DIRECTORY|-l|-n NUMBER]
-  DIRECTORY      Change to the specified directory.
-  -l             List tracked directories with line numbers.
-  -n NUMBER      Change to the directory at the specified line.
-  -              Switch to the previous directory.
-Options:
-  -L             Follow symbolic links (default).
-  -P             Use the physical directory structure.
-  -e             Exit with non-zero if current working directory fails.
-  -@             On supported systems, show extended file attributes.
-EOF
-                return 0
+            -a)
+                add_descendants=true
+                ;;
+            -e)
+                cd_opts+=" $1"
+                ;;
+            -L)
+                cd_opts+=" $1"
                 ;;
             -l)
-                nl -w 4 -s ": " "${dir_file}"
-                return 0
+                list_after_remove=true
                 ;;
             -n)
                 shift
                 if [[ -z "$1" || ! "$1" =~ ^[0-9]+$ ]]; then
-                    echo "Error: Please provide a valid line number." >&2
+                    echo "Error: The -n option requires a valid line number argument." >&2
                     return 1
                 fi
-                target_dir=$(sed -n "${1}p" "${dir_file}")
-                if [[ -z "${target_dir}" ]]; then
-                    echo "Error: No directory at line $1." >&2
+                line_number="$1"
+                if [[ "$line_number" -gt $(wc -l < "${dir_file}") ]]; then
+                    echo "Error: Line number $line_number exceeds the total lines in the file." >&2
                     return 1
                 fi
+                ;;
+            -P)
+                cd_opts+=" $1"
+                ;;
+            -r)
+                shift
+                if [[ -z "$1" ]]; then
+                    echo "Error: The -r option requires a number, range, or pattern argument." >&2
+                    return 1
+                fi
+                remove_arg="$1"
+                ;;
+            -@)
+                cd_opts+=" $1"
+                ;;
+            -h)
+                cat <<EOF
+Usage: ${func_name} [OPTIONS] [DIRECTORY]
+Options supported by default cd:
+  -L             Follow symbolic links (default).
+  -P             Use the physical directory structure.
+  -e             Exit with non-zero if the current working directory fails.
+  -@             On supported systems, show extended file attributes.
+
+Options supported by jd:
+  -a             Add all descendant directories of the current working directory.
+  -h             Show this help message.
+  -l             List tracked directories with line numbers.
+  -n NUMBER      Change to the directory at the specified line.
+  -r ARG         Remove lines by line number/range (e.g., 3,6) or matching pattern.
+EOF
+                return 0
                 ;;
             *)
                 args+=("$1")  # Collect positional arguments (directory paths)
@@ -72,20 +110,40 @@ EOF
         shift
     done
 
-    # Determine the directory to navigate to
-    local new_dir="${args[0]:-}"
-    if [[ -n "$target_dir" ]]; then
-        new_dir="$target_dir"
-    elif [[ -z "$new_dir" && -z "$target_dir" ]]; then
-        new_dir="$HOME"
+    # Handle the -r option
+    if [[ -n "$remove_arg" ]]; then
+        if [[ "$remove_arg" =~ ^[0-9]+,[0-9]+$ ]]; then
+            # Convert range "N,M" to sed-compatible "N,M"
+            sed -i "${remove_arg}d" "${dir_file}"
+            echo "Removed lines ${remove_arg} from ${dir_file}."
+        else
+            # Remove lines matching the pattern
+            grep -v -E "$remove_arg" "${dir_file}" > "${dir_file}.tmp" && mv "${dir_file}.tmp" "${dir_file}"
+            echo "Removed lines matching pattern '$remove_arg' from ${dir_file}."
+        fi
     fi
 
-    if [[ "$new_dir" == "-" ]]; then
-        if [[ -z "${OLDPWD}" ]]; then
-            echo "Error: No previous directory to switch to." >&2
+    # Handle the -l option to list tracked directories
+    if [[ "$list_after_remove" == true ]]; then
+        awk -v cyan="$cyan" -v orange="$orange" -v green="$green" -v reset="$reset" '
+            { 
+                color = (NR % 3 == 1) ? cyan : (NR % 3 == 2) ? orange : green;
+                printf color "%4d: %s" reset "\n", NR, $0;
+            }
+        ' "${dir_file}"
+        return 0
+    fi
+
+    # Determine the directory to navigate to
+    local new_dir="${args[0]:-}"
+    if [[ -n "$line_number" ]]; then
+        new_dir=$(sed -n "${line_number}p" "${dir_file}")
+        if [[ -z "$new_dir" ]]; then
+            echo "Error: No directory at line ${line_number}." >&2
             return 1
         fi
-        new_dir="${OLDPWD}"
+    elif [[ -z "$new_dir" ]]; then
+        new_dir="$HOME"
     fi
 
     local resolved_path
@@ -93,6 +151,15 @@ EOF
         echo "Error: Failed to resolve path: $new_dir" >&2
         return 1
     }
+
+    if [[ "$add_descendants" == true ]]; then
+        find . -type d -print | while IFS= read -r dir; do
+            resolved=$(resolve_path "$dir")
+            if ! grep -Fxq "$resolved" "$dir_file"; then
+                echo "$resolved" >> "${dir_file}"
+            fi
+        done
+    fi
 
     local prev_dir="${PWD}"
     builtin cd $cd_opts "$resolved_path" 2>/dev/null

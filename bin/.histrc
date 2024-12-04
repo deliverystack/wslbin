@@ -1,0 +1,32 @@
+shopt -s histappend
+
+export HISTCONTROL=ignoreboth
+export HISTSIZE=10000
+export HISTFILESIZE=10000
+
+# merge and eliminate duplicate lines in local and shared histories
+# nl # merge the contents of both files in order
+# sort # reverse the order (makes it easier to keep latest)
+# sed # trim
+# uniq # filter non-unique lines
+# sort # sort by line number added by nl
+# cut # remove line numbers
+# sed # remove lines that contain less than 8 non-whitespace characters
+
+temphist=$(mktemp)
+nl "$HOME/bin/.bash_history" "$HISTFILE" \
+  | sort -f -b -k2 -r \
+  | sed 's/[[:blank:]]*$//' \
+  | uniq -f 1 \
+  | sort -n \
+  | cut -c8- \
+  | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; /\([^[:space:]]\{1\}.*\)\{8\}/!d' > "$temphist"
+cp "$HOME/bin/.bash_history" "/tmp/.bash_history.shared.$(hostname).$(date +%N).bak"
+cp "$HISTFILE" "/tmp/.bash_history.$(hostname).$(date +%N).bak"
+cp "$temphist" "$HOME/bin/.bash_history"
+mv "$temphist" "$HISTFILE"
+
+histcmd="history | tail -n 1 | cut -c8- >> ${HOME}/.hist.log"
+[[ ":${PROMPT_COMMAND}:" != *":${new_command}:"* ]] && export PROMPT_COMMAND="${histcmd};${PROMPT_COMMAND}"
+
+alias hb='history | tac | batcat -l sh'
